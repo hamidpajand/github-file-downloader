@@ -1,39 +1,53 @@
-name: 'دانلود فایل دلخواه شما'
+name: دانلود فایل و ساخت ZIP رمزدار
 
 on:
   workflow_dispatch:
     inputs:
       file_url:
-        description: '🔗 لینک مستقیم فایل مورد نظرتان را اینجا وارد کنید'
+        description: 'لینک مستقیم فایل مورد نظر'
         required: true
         type: string
-        placeholder: 'مثال: https://example.com/file.zip'
+      zip_password:
+        description: 'رمز عبور برای فایل ZIP'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # اجازه Push به مخزن
 
 jobs:
-  run:
+  download-and-zip:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+
     steps:
-      - name: دریافت کدهای مخزن
+      - name: دریافت کد مخزن
         uses: actions/checkout@v4
-
-      - name: دانلود فایل از لینک وارد شده
-        run: wget -O "downloaded_file" "${{ inputs.file_url }}"
-
-      - name: استخراج نام فایل از لینک (اختیاری)
-        id: get_filename
-        run: |
-          FILENAME=$(basename "${{ inputs.file_url }}" | sed 's/?.*//')
-          echo "filename=${FILENAME}" >> $GITHUB_OUTPUT
-
-      - name: تغییر نام فایل به نام اصلی
-        run: mv downloaded_file "${{ steps.get_filename.outputs.filename }}"
-
-      - name: متعهد شدن و ارسال فایل به مخزن
-        uses: actions-x/commit@v6
         with:
-          files: "${{ steps.get_filename.outputs.filename }}"
-          name: "GitHub Actions"
-          email: "actions@github.com"
-          message: "اضافه کردن فایل توسط کاربر"
+          fetch-depth: 1
+
+      - name: دانلود فایل از لینک
+        run: |
+          curl -L -o downloaded_file "${{ github.event.inputs.file_url }}"
+          echo "FILE_NAME=downloaded_file" >> $GITHUB_ENV
+
+      - name: استخراج نام اصلی فایل (اختیاری)
+        run: |
+          ORIGINAL_NAME=$(basename "${{ github.event.inputs.file_url }}" | cut -d '?' -f1)
+          if [ -z "$ORIGINAL_NAME" ]; then
+            ORIGINAL_NAME="downloaded_file"
+          fi
+          echo "ORIGINAL_NAME=$ORIGINAL_NAME" >> $GITHUB_ENV
+
+      - name: ساخت ZIP رمزدار
+        run: |
+          ZIP_NAME="protected_${ORIGINAL_NAME}.zip"
+          zip -P "${{ github.event.inputs.zip_password }}" "$ZIP_NAME" downloaded_file
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Commit و Push فایل ZIP به مخزن
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "${{ env.ZIP_NAME }}"
+          git commit -m "Add encrypted zip file from workflow"
+          git push
